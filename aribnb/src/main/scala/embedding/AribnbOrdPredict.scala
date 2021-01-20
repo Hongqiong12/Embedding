@@ -27,7 +27,7 @@ object AribnbOrdPredict {
       .setMinCount(0) //大于25个的词数量：4639750    大于45个的词数量：3210577
       .setMaxIter(1)
       .setStepSize(0.01)
-      .setEOS("-1")  // 尾部终止符号，用来判断最后一个商品是否是点击的商品
+      .setEOS("-2")  // 尾部终止符号，用来判断最后一个商品是否是点击的商品
       .fit(walkSeqDf)
     word2Model.write.overwrite().save(s"$rootPath/modelFile")
     // 读取生成的embedding 向量

@@ -411,13 +411,13 @@ class Word2VecOpti extends Serializable with Logging {
           val lastIndex: Int = sentence(curLength-1)
           if(lastIndex == -1){
             curLength -=1
-            println("\n\n===========尾部是-1，表示倒数第二个词要作为窗口词进行更新===========")
+            println(s"\n\n===========尾部是$EOC，表示倒数第二个词要作为窗口词进行更新===========")
           }
           else {
-            println("\n\n===================尾部不是-1===========")
+            println(s"\n\n===================尾部不是$EOC===========")
           }
           wc += curLength
-          // 最后一个词-1不会作为中心词进行更新
+          // 最后一个词EOC不会作为中心词进行更新
         for(pos<- 0 until curLength if !(lastIndex == -1 && pos == curLength - 1)) {
           //此word是中心词
           val word: Int = sentence(pos)
