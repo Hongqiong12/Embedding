@@ -73,7 +73,6 @@ class Word2VecOpti extends Serializable with Logging {
 
   def setEoc(EOC: String): this.type = {
     // 可以允许输入的初始化的参数是空的，此时就选择默认的初始化的方式
-    println(EOC.isEmpty)
     this.EOC = EOC
     this
   }
