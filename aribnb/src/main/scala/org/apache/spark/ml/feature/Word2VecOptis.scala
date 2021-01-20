@@ -38,6 +38,15 @@ import org.apache.spark.util.{Utils, VersionUtils}
 private[feature] trait Word2VecOptiBase extends Params
   with HasInputCol with HasOutputCol with HasMaxIter with HasStepSize with HasSeed {
 
+  /**toDo 初始化终止符号
+   * Default:  collection.Map[String, Array[String]]
+   * @group expertParam
+   */
+  final val EOC: Param[String] =
+    new Param[String](this, "initVec", "init embed of vector")
+  setDefault(EOC -> "")
+
+
   /**
    * The dimension of the code that you want to transform from words.
    * Default: 100
@@ -127,6 +136,10 @@ final class Word2VecOptis @Since("1.4.0") (
                                             @Since("1.4.0") override val uid: String)
   extends Estimator[Word2VecOptiModel] with Word2VecOptiBase with DefaultParamsWritable {
 
+  // TODO 设定下单序列尾部的分割符号
+  def setEOS(value: String): this.type = set(EOC, value)
+
+
   @Since("1.4.0")
   def this() = this(Identifiable.randomUID("w2v"))
 
@@ -183,6 +196,7 @@ final class Word2VecOptis @Since("1.4.0") (
       .setVectorSize($(vectorSize))
       .setWindowSize($(windowSize))
       .setMaxSentenceLength($(maxSentenceLength))
+      .setEoc($(EOC))
       .fit(input)
     copyValues(new Word2VecOptiModel(uid, wordVectors).setParent(this))
   }

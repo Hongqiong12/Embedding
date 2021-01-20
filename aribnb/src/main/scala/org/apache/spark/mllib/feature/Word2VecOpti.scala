@@ -61,6 +61,7 @@ import scala.collection.mutable.ArrayBuffer
 @Since("1.1.0")
 class Word2VecOpti extends Serializable with Logging {
 
+
   private var vectorSize = 100
   private var learningRate = 0.025
   private var numPartitions = 1
@@ -68,7 +69,14 @@ class Word2VecOpti extends Serializable with Logging {
   private var seed = Utils.random.nextLong()
   private var minCount = 5
   private var maxSentenceLength = 1000
+  private var EOC=""
 
+  def setEoc(EOC: String): this.type = {
+    // 可以允许输入的初始化的参数是空的，此时就选择默认的初始化的方式
+    println(EOC.isEmpty)
+    this.EOC = EOC
+    this
+  }
 
   /**
    * Sets the maximum length (in words) of each sentence in the input data.
@@ -175,7 +183,7 @@ class Word2VecOpti extends Serializable with Logging {
   private def learnVocab[S <: Iterable[String]](dataset: RDD[S]): Unit = {
     //TODO STEP1：将-1的ID 去除，因为-1代表的是尾部的商品是下单的商品
     val words = dataset.flatMap(x => x)
-      .filter(x=>x!="-1")//构造词典的时候不将-1加入，该字符当做终止字符
+      .filter(x=>x!=EOC)//构造词典的时候不将-1加入，该字符当做终止字符
       .filter(x=>x!=" ")//乱码符号剔除
       .filter(x=>x.nonEmpty)//构造词典的时候不将-1加入，该字符当做终止字符
 
@@ -352,7 +360,7 @@ class Word2VecOpti extends Serializable with Logging {
           if(bcHash.contains(curStr)){
             wordIndexes.append(bcHash.getOrElse(curStr,-3))
           }
-          else if(curStr=="-1"){
+          else if(curStr==EOC){
             wordIndexes.append(-1)
           }
         }
@@ -399,7 +407,7 @@ class Word2VecOpti extends Serializable with Logging {
             logInfo(s"wordCount = ${wordCount + numWordsProcessedInPreviousIterations}, " +
               s"alpha = $alpha")
           }
-          // 若最终的词为-1，则将当前词的长度减1
+          // 若最终的词为EOC，则将当前词的长度减1
           var curLength = sentence.length
           val lastIndex: Int = sentence(curLength-1)
           if(lastIndex == -1){
