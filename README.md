@@ -21,3 +21,7 @@
 其中有一个要注意的点，在WORD2VEC中，当我们设置窗口的大小是5的时候，实际上更新的过程中窗口大小并不是真正的5，而是5-（随机初始化的一个1-5之间的值）。
 
 论文见：https://www.kdd.org/kdd2018/accepted-papers/view/real-time-personalization-using-embeddings-for-search-ranking-at-airbnb
+
+## 二、通过结合原始的WORD2VEC代码和https://github.com/petro-rudenko/spark-glove 这篇的单机GLOVE实现，实现GLOVE的分布式训练
+
+
