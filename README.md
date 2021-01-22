@@ -1,5 +1,7 @@
 # Embedding
-## 一、通过修改原始WORD2VEC算法，实现ARIBNB中将order商品作为全局上下文。
+## 一、aribnb global context 代码实现
+
+通过修改原始WORD2VEC算法，实现ARIBNB中将order商品作为全局上下文。
 
 可以通过运行embedding下的AribnbOrdPredict实现。运行代码中给定例子可以看出，对于序列为：
 9744_81732,2679_372273,2679_411245,2679_593370,4833_-1,4833_0,9434_19306,9434_7623,9434_89486,9435_12310,9435_26909,9435_422036,-1
@@ -22,6 +24,8 @@
 
 论文见：https://www.kdd.org/kdd2018/accepted-papers/view/real-time-personalization-using-embeddings-for-search-ranking-at-airbnb
 
-## 二、通过结合原始的WORD2VEC代码和https://github.com/petro-rudenko/spark-glove 这篇的单机GLOVE实现，实现GLOVE的分布式训练
+## 二、glove 分布式训练
+
+通过结合原始的WORD2VEC代码和https://github.com/petro-rudenko/spark-glove 这篇的单机GLOVE实现，实现GLOVE的分布式训练
 
 
