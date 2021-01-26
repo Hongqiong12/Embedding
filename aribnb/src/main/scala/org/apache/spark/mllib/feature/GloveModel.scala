@@ -47,7 +47,6 @@ class GloveModel  (
                     minCount:      Int    = 0,
                     learningRate:  Double = 0.05f,
                     alpha:         Double = 0.75,
-                    maxCount:      Double = 100.0,
                     seed:          Long   = 2L ,
                     vectorSize:    Int    = 32,
                     numIterations: Int    = 1
@@ -56,6 +55,7 @@ class GloveModel  (
   private var vocabHash = mutable.HashMap.empty[String, Int]
   private var vocabSize: Int = 1
   private var vocab: Array[(String, Int)] = new Array[(String, Int)](vocabSize.toInt)
+  private var maxCount = 100.0d
 
 
   // 计算序列的一些基础信息，词典的个数及每个词典中词的编号
@@ -65,9 +65,10 @@ class GloveModel  (
     vocab= words.map(w => (w, 1))
       .reduceByKey(_ + _)
       .filter(_._2 >= minCount)
-      .filter(_._2 <= maxCount)
       .collect()
       .sortBy(_._2)(Ordering[Int].reverse)
+    //得到最大词的个数
+    maxCount = vocab(vocab.length-1)._2.toDouble
     // 即可求得所有词的个数
     vocabSize = vocab.length
     require(vocabSize > 0, "The vocabulary size should be > 0. You may need to check " +
@@ -98,30 +99,31 @@ class GloveModel  (
     val bcVocabHash = sc.broadcast(vocabHash)
     val coocurrenceMatrix: RDD[Iterator[(Int, Int, Double)]] = dataset
       .map{iter: Array[String] =>
-      {
-        var coocurences = scala.collection.mutable.HashMap.empty[(Int, Int), Double]
-        var windowBuffer = List.empty[Int]
-        iter.foreach { w =>
-          val word = bcVocabHash.value.get(w).map(w => {
-            for {
-              (contextWord, i) <- windowBuffer.zipWithIndex
-              if (w != contextWord)
-              w1 = Math.min(w, contextWord)
-              w2 = Math.max(w, contextWord)
-            } {
-              coocurences += (w1, w2) -> (coocurences.getOrElse((w1, w2), 0.0) + 1.0 / (i + 1))
-            }
-            windowBuffer ::= w
-            if (windowBuffer.size == window) windowBuffer = windowBuffer.init
-          })
+        {
+          var coocurences = scala.collection.mutable.HashMap.empty[(Int, Int), Double]
+          var windowBuffer = List.empty[Int]
+          iter.foreach { w =>
+            val word = bcVocabHash.value.get(w).map(w => {
+              for {
+                (contextWord, i) <- windowBuffer.zipWithIndex
+                if (w != contextWord)
+                w1 = Math.min(w, contextWord)
+                w2 = Math.max(w, contextWord)
+              } {
+                coocurences += (w1, w2) -> (coocurences.getOrElse((w1, w2), 0.0) + 1.0 / (i + 1))
+              }
+              windowBuffer ::= w
+              if (windowBuffer.size == window) windowBuffer = windowBuffer.init
+            })
+          }
+          coocurences.map { case (k, v) => (k._1, k._2, v) }.toSeq.iterator
         }
-        coocurences.map { case (k, v) => (k._1, k._2, v) }.toSeq.iterator
-      }
       }
     coocurrenceMatrix
       .flatMap(x=>x)
       .map(x=>((x._1, x._2), x._3))
       .reduceByKey(_ + _)
+      .filter(x=>x._2>0)
       .map(x=>(x._1._1, x._1._2, x._2))
   }
 
@@ -136,7 +138,10 @@ class GloveModel  (
     val initRandom = new XORShiftRandom(seed)
     val syn0Global: Array[Float] =Array.fill[Float](vocabSize * vectorSize)((initRandom.nextFloat() - 0.5f) / vectorSize)
     val syn1Global: Array[Float] = Array.fill[Float](vocabSize)((initRandom.nextFloat() - 0.5f) / vectorSize)
-
+    // 测试代码
+    val startIndex: Int = vocabHash.getOrElse("6277_201512", 1)
+    println(s" 单词6277_201512的embedding向量为： ${syn0Global.slice(startIndex*vectorSize,(startIndex+1)*vectorSize).map(x=>x.toString).mkString(",")}")
+    //
     val alpha = learningRate
     for (k <- 1 to numIterations) {
       println(s"------迭代第${k}步的结果----------")
@@ -168,8 +173,6 @@ class GloveModel  (
           Some((index, syn0Modify.slice(index * vectorSize, (index + 1) * vectorSize)))
         }.flatten
       }
-      //      println(s"---总的生成向量数量为：${partial.count()}-----")
-      //      partial.take(500).foreach(x=>println(s"\n ${x._1.toString}的向量为: ${x._2.mkString(",")} \n"))
 
       //do normalization
       val synAgg: Array[(Int, Array[Float])] = partial.mapPartitions { iter =>
@@ -189,21 +192,20 @@ class GloveModel  (
       }
       bcSyn0Global.destroy(false)
       bcSyn1Global.destroy(false)
+      //
+      val startIndex: Int = vocabHash.getOrElse("6277_201512", 1)
+      println(s" ${k}步后，单词6277_201512的embedding向量为： ${syn0Global.slice(startIndex*vectorSize,(startIndex+1)*vectorSize).map(x=>x.toString).mkString(",")}")
+      //
     }
 
     val bcSyn0Global = sc.broadcast(syn0Global)
 //    vocabHash.map(x=>x._2).foreach(x=>print(s"${x},"))
+
     val value = sc
       .parallelize(vocabHash.map(x=>(x._1, x._2)).toArray[(String,Int)])
       .map{x=>
-        val word: String = x._1
         val wordIndex: Int = x._2
-        val wordEmbedArr: Array[Float] = bcSyn0Global.value
-        val curWordEmbed: Array[Float] = new Array[Float](vectorSize)
-        for(i<-0 until vectorSize){
-          curWordEmbed(i)= wordEmbedArr(wordIndex*vectorSize+i)
-        }
-        (word, curWordEmbed.map(x=>x.toString).mkString(","))
+        (x._1, bcSyn0Global.value.slice(wordIndex*vectorSize,(wordIndex+1)*vectorSize).map(x=>x.toString).mkString(","))
       }
     //
     //
