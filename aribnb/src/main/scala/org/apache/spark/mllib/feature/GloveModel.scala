@@ -83,7 +83,6 @@ class GloveModel  (
 
 
   def fit(dataset: RDD[Array[String]]): RDD[(String, String)] = {
-    val array: Array[Array[String]] = dataset.take(10)
     val sc = dataset.context
     learnVocab(dataset)
     val coMatrix: RDD[(Int, Int, Double)] = coocurrenceMatrix(dataset)
