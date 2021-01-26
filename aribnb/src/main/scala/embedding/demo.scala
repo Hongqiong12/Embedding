@@ -31,7 +31,7 @@ object demo {
   }
   private def glove(spark: SparkSession, walkSeqDf: DataFrame): DataFrame = {
     val value = walkSeqDf.rdd.map(x => x.getString(0).split(","))
-    val gloveModel = new GloveModel()
+    val gloveModel = new GloveModel(maxCount=3)
     val value1 = gloveModel.fit(value)
     //创建schema信息
     val structSchema: StructType = StructType(
@@ -42,7 +42,8 @@ object demo {
       )
     )
     val wordVecDf = spark.createDataFrame(value1.map(x=>Row(x._1, x._2)),structSchema)
-    wordVecDf.show(10,false)
+    wordVecDf.show(131,false)
+    println(s"----最终得到的词有${wordVecDf.count()}-")
     wordVecDf
   }
 

@@ -42,16 +42,16 @@ import scala.collection.mutable
  *        though may need adjustment for very small or very large corpora
  */
 class GloveModel  (
-             window:        Int    = 5,
-             numComponents: Int    = 50,
-             minCount:      Int    = 0,
-             learningRate:  Double = 0.05f,
-             alpha:         Double = 0.75,
-             maxCount:      Double = 100.0,
-             seed:          Long   = 2L ,
-             vectorSize:    Int    = 32,
-             numIterations: Int    = 1
-           ) extends Serializable with Logging {
+                    window:        Int    = 5,
+                    numComponents: Int    = 50,
+                    minCount:      Int    = 0,
+                    learningRate:  Double = 0.05f,
+                    alpha:         Double = 0.75,
+                    maxCount:      Double = 100.0,
+                    seed:          Long   = 2L ,
+                    vectorSize:    Int    = 32,
+                    numIterations: Int    = 1
+                  ) extends Serializable with Logging {
 
   private var vocabHash = mutable.HashMap.empty[String, Int]
   private var vocabSize: Int = 1
@@ -65,6 +65,7 @@ class GloveModel  (
     vocab= words.map(w => (w, 1))
       .reduceByKey(_ + _)
       .filter(_._2 >= minCount)
+      .filter(_._2 <= maxCount)
       .collect()
       .sortBy(_._2)(Ordering[Int].reverse)
     // 即可求得所有词的个数
@@ -97,25 +98,25 @@ class GloveModel  (
     val bcVocabHash = sc.broadcast(vocabHash)
     val coocurrenceMatrix: RDD[Iterator[(Int, Int, Double)]] = dataset
       .map{iter: Array[String] =>
-        {
-          var coocurences = scala.collection.mutable.HashMap.empty[(Int, Int), Double]
-          var windowBuffer = List.empty[Int]
-          iter.foreach { w =>
-            val word = bcVocabHash.value.get(w).map(w => {
-              for {
-                (contextWord, i) <- windowBuffer.zipWithIndex
-                if (w != contextWord)
-                w1 = Math.min(w, contextWord)
-                w2 = Math.max(w, contextWord)
-              } {
-                coocurences += (w1, w2) -> (coocurences.getOrElse((w1, w2), 0.0) + 1.0 / (i + 1))
-              }
-              windowBuffer ::= w
-              if (windowBuffer.size == window) windowBuffer = windowBuffer.init
-            })
-          }
-          coocurences.map { case (k, v) => (k._1, k._2, v) }.toSeq.iterator
+      {
+        var coocurences = scala.collection.mutable.HashMap.empty[(Int, Int), Double]
+        var windowBuffer = List.empty[Int]
+        iter.foreach { w =>
+          val word = bcVocabHash.value.get(w).map(w => {
+            for {
+              (contextWord, i) <- windowBuffer.zipWithIndex
+              if (w != contextWord)
+              w1 = Math.min(w, contextWord)
+              w2 = Math.max(w, contextWord)
+            } {
+              coocurences += (w1, w2) -> (coocurences.getOrElse((w1, w2), 0.0) + 1.0 / (i + 1))
+            }
+            windowBuffer ::= w
+            if (windowBuffer.size == window) windowBuffer = windowBuffer.init
+          })
         }
+        coocurences.map { case (k, v) => (k._1, k._2, v) }.toSeq.iterator
+      }
       }
     coocurrenceMatrix
       .flatMap(x=>x)
@@ -127,9 +128,9 @@ class GloveModel  (
 
   // 训练模型的代码
   private def doFit(dataset: RDD[Array[String]],
-                                           bcVocabHash: Broadcast[mutable.HashMap[String, Int]],
-                                           coMatrix:RDD[(Int, Int, Double)]
-                                          ): RDD[(String, String)] ={
+                    bcVocabHash: Broadcast[mutable.HashMap[String, Int]],
+                    coMatrix:RDD[(Int, Int, Double)]
+                   ): RDD[(String, String)] ={
     val sc: SparkContext = dataset.context
     // 初始化向量
     val initRandom = new XORShiftRandom(seed)
@@ -164,11 +165,11 @@ class GloveModel  (
           syn1Modify(x._2) -= (learningRate * loss).toFloat
         }
         Iterator.tabulate(vocabSize) { index =>
-            Some((index, syn0Modify.slice(index * vectorSize, (index + 1) * vectorSize)))
+          Some((index, syn0Modify.slice(index * vectorSize, (index + 1) * vectorSize)))
         }.flatten
       }
-//      println(s"---总的生成向量数量为：${partial.count()}-----")
-//      partial.take(500).foreach(x=>println(s"\n ${x._1.toString}的向量为: ${x._2.mkString(",")} \n"))
+      //      println(s"---总的生成向量数量为：${partial.count()}-----")
+      //      partial.take(500).foreach(x=>println(s"\n ${x._1.toString}的向量为: ${x._2.mkString(",")} \n"))
 
       //do normalization
       val synAgg: Array[(Int, Array[Float])] = partial.mapPartitions { iter =>
@@ -191,8 +192,9 @@ class GloveModel  (
     }
 
     val bcSyn0Global = sc.broadcast(syn0Global)
+//    vocabHash.map(x=>x._2).foreach(x=>print(s"${x},"))
     val value = sc
-      .parallelize(vocab)
+      .parallelize(vocabHash.map(x=>(x._1, x._2)).toArray[(String,Int)])
       .map{x=>
         val word: String = x._1
         val wordIndex: Int = x._2
@@ -203,13 +205,13 @@ class GloveModel  (
         }
         (word, curWordEmbed.map(x=>x.toString).mkString(","))
       }
-//
-//
-//
-//    println("-------------将syn0Global按照vectorSize大小切分成二维数组---------------")
-//    val tmpArr = split(syn0Global.toList, vectorSize)
-//    val tuples = vocab.map(x => x._1).zip(tmpArr).map(x=>(x._1, x._2.map(x=>x.toString).mkString(",")))
-//    val value = sc.parallelize(tuples)
+    //
+    //
+    //
+    //    println("-------------将syn0Global按照vectorSize大小切分成二维数组---------------")
+    //    val tmpArr = split(syn0Global.toList, vectorSize)
+    //    val tuples = vocab.map(x => x._1).zip(tmpArr).map(x=>(x._1, x._2.map(x=>x.toString).mkString(",")))
+    //    val value = sc.parallelize(tuples)
     value
   }
 
