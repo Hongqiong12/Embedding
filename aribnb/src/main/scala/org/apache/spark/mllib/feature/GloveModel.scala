@@ -190,10 +190,26 @@ class GloveModel  (
       bcSyn1Global.destroy(false)
     }
 
-    println("-------------将syn0Global按照vectorSize大小切分成二维数组---------------")
-    val tmpArr = split(syn0Global.toList, vectorSize)
-    val tuples = vocab.map(x => x._1).zip(tmpArr).map(x=>(x._1, x._2.map(x=>x.toString).mkString(",")))
-    val value = sc.parallelize(tuples)
+    val bcSyn0Global = sc.broadcast(syn0Global)
+    val value = sc
+      .parallelize(vocab)
+      .map{x=>
+        val word: String = x._1
+        val wordIndex: Int = x._2
+        val wordEmbedArr: Array[Float] = bcSyn0Global.value
+        val curWordEmbed: Array[Float] = new Array[Float](vectorSize)
+        for(i<-0 until vectorSize){
+          curWordEmbed(i)= wordEmbedArr(wordIndex*vectorSize+i)
+        }
+        (word, curWordEmbed.map(x=>x.toString).mkString(","))
+      }
+//
+//
+//
+//    println("-------------将syn0Global按照vectorSize大小切分成二维数组---------------")
+//    val tmpArr = split(syn0Global.toList, vectorSize)
+//    val tuples = vocab.map(x => x._1).zip(tmpArr).map(x=>(x._1, x._2.map(x=>x.toString).mkString(",")))
+//    val value = sc.parallelize(tuples)
     value
   }
 
