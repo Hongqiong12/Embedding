@@ -2,7 +2,9 @@ package embedding
 
 import org.apache.spark.ml.feature.{Word2VecOptiModel, Word2VecOptis}
 import org.apache.spark.mllib.feature.GloveModel
-import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.types.{StringType, StructField, StructType}
+import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import utils.SparkUtil
 
 import java.net.URL
@@ -24,14 +26,24 @@ object demo {
     // 爱彼迎的论文复现，将ORDER的商品作为全局的context
 //    word2vec(spark, rootPath, walkSeqDf)
     // GLOVE分布式实现的DEMO
-    glove(spark,walkSeqDf)
-
+    glove(spark, walkSeqDf)
 
   }
-  private def glove(spark: SparkSession, walkSeqDf: DataFrame) = {
+  private def glove(spark: SparkSession, walkSeqDf: DataFrame): DataFrame = {
     val value = walkSeqDf.rdd.map(x => x.getString(0).split(","))
     val gloveModel = new GloveModel()
-    gloveModel.fit(value)
+    val value1 = gloveModel.fit(value)
+    //创建schema信息
+    val structSchema: StructType = StructType(
+      List(
+
+        StructField("word"     , StringType, true),
+        StructField("embedding", StringType, true)
+      )
+    )
+    val wordVecDf = spark.createDataFrame(value1.map(x=>Row(x._1, x._2)),structSchema)
+    wordVecDf.show(10,false)
+    wordVecDf
   }
 
 

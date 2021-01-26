@@ -24,6 +24,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.util.random.XORShiftRandom
 import com.github.fommil.netlib.BLAS.{getInstance => blas}
 import org.apache.spark.mllib.util.Saveable
+import org.apache.spark.sql.types.{StringType, StructField, StructType}
 
 import scala.collection.mutable
 
@@ -66,7 +67,6 @@ class GloveModel  (
       .filter(_._2 >= minCount)
       .collect()
       .sortBy(_._2)(Ordering[Int].reverse)
-    println(vocab.mkString(","))
     // 即可求得所有词的个数
     vocabSize = vocab.length
     require(vocabSize > 0, "The vocabulary size should be > 0. You may need to check " +
@@ -82,13 +82,14 @@ class GloveModel  (
 
 
 
-  def fit(dataset: RDD[Array[String]]) = {
+  def fit(dataset: RDD[Array[String]]): RDD[(String, String)] = {
     val array: Array[Array[String]] = dataset.take(10)
     val sc = dataset.context
     learnVocab(dataset)
     val coMatrix: RDD[(Int, Int, Double)] = coocurrenceMatrix(dataset)
     val bcVocabHash = sc.broadcast(vocabHash)
-    doFit(dataset,bcVocabHash,coMatrix)
+    val value = doFit(dataset, bcVocabHash, coMatrix)
+    value
   }
 
   //计算共现矩阵，输出为(开始点，终止点，共现次数)，注意为了防止重复计算，因为 ab和ba在glove中无明显差异，因此约定编号小的在左侧
@@ -129,7 +130,7 @@ class GloveModel  (
   private def doFit(dataset: RDD[Array[String]],
                                            bcVocabHash: Broadcast[mutable.HashMap[String, Int]],
                                            coMatrix:RDD[(Int, Int, Double)]
-                                          )={
+                                          ): RDD[(String, String)] ={
     val sc: SparkContext = dataset.context
     // 初始化向量
     val initRandom = new XORShiftRandom(seed)
@@ -189,16 +190,18 @@ class GloveModel  (
       bcSyn0Global.destroy(false)
       bcSyn1Global.destroy(false)
     }
-    for(i<- 0 until 5){
-      val tmpWord = vocab(i)._1
-      println(s"----单词$tmpWord 的embedding向量为：")
-      val tmpArr = new Array[Float](vectorSize)
-      for(j<- 0 until vectorSize ){
-        tmpArr(j) = syn0Global(i*vectorSize+j)
-      }
-      println(tmpArr.mkString(","))
-    }
 
+    println("-------------将syn0Global按照vectorSize大小切分成二维数组---------------")
+    val tmpArr = split(syn0Global.toList, vectorSize)
+    val tuples = vocab.map(x => x._1).zip(tmpArr).map(x=>(x._1, x._2.map(x=>x.toString).mkString(",")))
+    val value = sc.parallelize(tuples)
+    value
+  }
+
+  // 按照指定的长度，将一维数组切分为多维数组
+  def split[A](xs: List[A], n: Int): List[List[A]] = {
+    if (xs.size <= n) xs :: Nil
+    else (xs take n) :: split(xs drop n, n)
   }
 
 }
