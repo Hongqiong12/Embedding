@@ -147,63 +147,52 @@ class GloveModel  (
       println(s"------迭代第${k}步的结果----------")
       val bcSyn0Global = sc.broadcast(syn0Global)
       val bcSyn1Global = sc.broadcast(syn1Global)
-      val partial: RDD[(Int, Array[Float])] = coMatrix.mapPartitions { sentences: Iterator[(Int, Int, Double)] =>
-        val syn0Modify: Array[Float] = bcSyn0Global.value
-        val syn1Modify: Array[Float] = bcSyn1Global.value
-        sentences.foreach { x: (Int, Int, Double) =>
-          val l1 = x._1 * vectorSize //w1的起始位置
-          val l2 = x._2 * vectorSize //w2的起始位置
-          val count = x._3              //两个词共现的次数
-          val prediction: Float = blas.sdot(vectorSize, syn0Modify, l1, 1, syn0Modify, l2, 1)
-          val wordAnorm = math.sqrt(blas.sdot(vectorSize, syn0Modify, l1, 1, syn0Modify, l1, 1))
-          val wordBnorm = math.sqrt(blas.sdot(vectorSize, syn0Modify, l2, 1, syn0Modify, l2, 1))
-          //  进行归一化
-          val word1Normlize: Array[Float] = if(wordAnorm==0){
-            Array.fill[Float](vectorSize)(0)
-          }else{
-            syn0Modify
-              .slice(x._1 * vectorSize, (x._1+1) * vectorSize)
-              .map(x=>x/wordAnorm.toFloat)
+      val partial: RDD[(Int, Array[Float])] = coMatrix
+        .mapPartitions { sentences: Iterator[(Int, Int, Double)] =>
+          val syn0Modify: Array[Float] = bcSyn0Global.value
+          val syn1Modify: Array[Float] = bcSyn1Global.value
+          sentences.foreach { x: (Int, Int, Double) =>
+            val l1 = x._1 * vectorSize //w1的起始位置
+            val l2 = x._2 * vectorSize //w2的起始位置
+            val count = x._3              //两个词共现的次数
+            val prediction: Float = blas.sdot(vectorSize, syn0Modify, l1, 1, syn0Modify, l2, 1)
+            val wordAnorm: Double = math.sqrt(blas.sdot(vectorSize, syn0Modify, l1, 1, syn0Modify, l1, 1))
+            val wordBnorm: Double = math.sqrt(blas.sdot(vectorSize, syn0Modify, l2, 1, syn0Modify, l2, 1))
+            //  进行归一化
+            val word1Normlize: Array[Float] = if(wordAnorm-0.0<=1e-7){
+              Array.fill[Float](vectorSize)(0)
+            }else{
+              syn0Modify
+                .slice(x._1 * vectorSize, (x._1+1) * vectorSize)
+                .map(x=>x/wordAnorm.toFloat)
+            }
+            val word2Normlize: Array[Float] = if(wordBnorm-0.0<=1e-7){
+              Array.fill[Float](vectorSize)(0)
+            }else{
+              syn0Modify
+                .slice(x._2 * vectorSize, (x._2+1) * vectorSize)
+                .map(x=>x/wordAnorm.toFloat)
+            }
+            // f函数
+            val entryWeight = Math.pow(Math.min(1.0f, (count / maxCount)), alpha)
+            // 实际不为LOSS，而是LOSS的导数
+            val loss = entryWeight * (prediction+syn1Modify(x._1)+syn1Modify(x._2) - Math.log(count))
+            // 梯度下降进行求解
+            for (i <- 0 until vectorSize) {
+              syn0Modify(l1+i) = (word1Normlize(i)- learningRate * loss * word2Normlize(i) ).toFloat
+              syn0Modify(l2+i) = (word2Normlize(i)- learningRate * loss * word1Normlize(i) ).toFloat
+            }
+            syn1Modify(x._1) -= (learningRate * loss).toFloat
+            syn1Modify(x._2) -= (learningRate * loss).toFloat
           }
-          val word2Normlize: Array[Float] = if(wordBnorm==0){
-            Array.fill[Float](vectorSize)(0)
-          }else{
-            syn0Modify
-              .slice(x._2 * vectorSize, (x._2+1) * vectorSize)
-              .map(x=>x/wordAnorm.toFloat)
-          }
-          // f函数
-          val entryWeight = Math.pow(Math.min(1.0, (count / maxCount)), alpha)
-          // 实际不为LOSS，而是LOSS的导数
-          val loss = entryWeight * (prediction+syn1Modify(x._1)+syn1Modify(x._2) - Math.log(count))
-          // 梯度下降进行求解
-          for (i <- 0 until vectorSize) {
-            syn0Modify(l1+i) = (word1Normlize(i)- learningRate * loss * word2Normlize(i) ).toFloat
-            syn0Modify(l2+i) = (word2Normlize(i)- learningRate * loss * word1Normlize(i) ).toFloat
-          }
-          syn1Modify(x._1) -= (learningRate * loss).toFloat
-          syn1Modify(x._2) -= (learningRate * loss).toFloat
-        }
-        Iterator.tabulate(vocabSize) { index =>
-          Some((index, syn0Modify.slice(index * vectorSize, (index + 1) * vectorSize)))
-        }.flatten
+          Iterator.tabulate(vocabSize) { index =>
+            Some((index, syn0Modify.slice(index * vectorSize, (index + 1) * vectorSize)))
+          }.flatten
       }
-
-      //do normalization
-      val synAgg: Array[(Int, Array[Float])] = partial.mapPartitions { iter =>
-        iter.map { case (id, vec) =>
-          (id, (vec, 1))
-        }
-      }.reduceByKey { case ((v1, count1), (v2, count2)) =>
-        blas.saxpy(vectorSize, 1.0f, v2, 1, v1, 1)
-        (v1, count1 + count2)
-      }.map { case (id, (vec, count)) =>
-        blas.sscal(vectorSize, 1.0f / count, vec, 1)
-        (id, vec)
-      }.collect()
-
+      val wordEmbed = partial.collectAsMap()
       for(i<- 0 until vocabSize){
-        Array.copy(synAgg(i)._2, 0, syn0Global,  synAgg(i)._1* vectorSize, vectorSize)
+        val maybeFloats: Array[Float] = wordEmbed.getOrElse(i, Array.fill[Float](vectorSize)(0))
+        Array.copy(maybeFloats, 0, syn0Global,  vectorSize, vectorSize)
       }
       bcSyn0Global.destroy(false)
       bcSyn1Global.destroy(false)

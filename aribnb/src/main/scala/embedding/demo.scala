@@ -31,7 +31,7 @@ object demo {
   }
   private def glove(spark: SparkSession, walkSeqDf: DataFrame): DataFrame = {
     val value = walkSeqDf.rdd.map(x => x.getString(0).split(","))
-    val gloveModel = new GloveModel(maxCount=3)
+    val gloveModel = new GloveModel(numIterations = 10)
     val value1 = gloveModel.fit(value)
     //创建schema信息
     val structSchema: StructType = StructType(
@@ -41,8 +41,12 @@ object demo {
         StructField("embedding", StringType, true)
       )
     )
-    val wordVecDf = spark.createDataFrame(value1.map(x=>Row(x._1, x._2)),structSchema)
-    wordVecDf.show(131,false)
+    val wordVecDf: DataFrame = spark.createDataFrame(value1.map(x=>Row(x._1, x._2)),structSchema)
+    val T: RDD[Row] = wordVecDf.rdd
+
+
+
+    wordVecDf.show(2,false)
     println(s"----最终得到的词有${wordVecDf.count()}-")
     wordVecDf
   }
@@ -56,7 +60,7 @@ object demo {
       .setVectorSize(32)
       .setWindowSize(5)
       .setMinCount(0) //大于25个的词数量：4639750    大于45个的词数量：3210577
-      .setMaxIter(1)
+      .setMaxIter(2)
       .setStepSize(0.01)
       .setEOS("-2") // 尾部终止符号，用来判断最后一个商品是否是点击的商品
       .fit(walkSeqDf.map(x=>x.getString(0).split(",")))
@@ -73,5 +77,6 @@ object demo {
     // 其中假设9435_422036 是下单的商品
     resEmbed.where("skuId='9964_605249' or skuId='16796_348014'")
       .show(2, false)
+    resEmbed.rdd.foreach(x=>println(x.getString(1).split(",").length))
   }
 }
