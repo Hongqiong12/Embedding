@@ -99,25 +99,25 @@ class GloveModel  (
     val bcVocabHash = sc.broadcast(vocabHash)
     val coocurrenceMatrix: RDD[Iterator[(Int, Int, Double)]] = dataset
       .map{iter: Array[String] =>
-        {
-          var coocurences = scala.collection.mutable.HashMap.empty[(Int, Int), Double]
-          var windowBuffer = List.empty[Int]
-          iter.foreach { w =>
-            val word = bcVocabHash.value.get(w).map(w => {
-              for {
-                (contextWord, i) <- windowBuffer.zipWithIndex
-                if (w != contextWord)
-                w1 = Math.min(w, contextWord)
-                w2 = Math.max(w, contextWord)
-              } {
-                coocurences += (w1, w2) -> (coocurences.getOrElse((w1, w2), 0.0) + 1.0 / (i + 1))
-              }
-              windowBuffer ::= w
-              if (windowBuffer.size == window) windowBuffer = windowBuffer.init
-            })
-          }
-          coocurences.map { case (k, v) => (k._1, k._2, v) }.toSeq.iterator
+      {
+        var coocurences = scala.collection.mutable.HashMap.empty[(Int, Int), Double]
+        var windowBuffer = List.empty[Int]
+        iter.foreach { w =>
+          val word = bcVocabHash.value.get(w).map(w => {
+            for {
+              (contextWord, i) <- windowBuffer.zipWithIndex
+              if (w != contextWord)
+              w1 = Math.min(w, contextWord)
+              w2 = Math.max(w, contextWord)
+            } {
+              coocurences += (w1, w2) -> (coocurences.getOrElse((w1, w2), 0.0) + 1.0 / (i + 1))
+            }
+            windowBuffer ::= w
+            if (windowBuffer.size == window) windowBuffer = windowBuffer.init
+          })
         }
+        coocurences.map { case (k, v) => (k._1, k._2, v) }.toSeq.iterator
+      }
       }
     coocurrenceMatrix
       .flatMap(x=>x)
@@ -154,17 +154,32 @@ class GloveModel  (
           val l1 = x._1 * vectorSize //w1的起始位置
           val l2 = x._2 * vectorSize //w2的起始位置
           val count = x._3              //两个词共现的次数
-          val prediction = blas.sdot(vectorSize, syn0Modify, l1, 1, syn0Modify, l2, 1)
-          val word_a_norm = math.sqrt(blas.sdot(vectorSize, syn0Modify, l1, 1, syn0Modify, l1, 1))
-          val word_b_norm = math.sqrt(blas.sdot(vectorSize, syn0Modify, l2, 1, syn0Modify, l2, 1))
+          val prediction: Float = blas.sdot(vectorSize, syn0Modify, l1, 1, syn0Modify, l2, 1)
+          val wordAnorm = math.sqrt(blas.sdot(vectorSize, syn0Modify, l1, 1, syn0Modify, l1, 1))
+          val wordBnorm = math.sqrt(blas.sdot(vectorSize, syn0Modify, l2, 1, syn0Modify, l2, 1))
+          //  进行归一化
+          val word1Normlize: Array[Float] = if(wordAnorm==0){
+            Array.fill[Float](vectorSize)(0)
+          }else{
+            syn0Modify
+              .slice(x._1 * vectorSize, (x._1+1) * vectorSize)
+              .map(x=>x/wordAnorm.toFloat)
+          }
+          val word2Normlize: Array[Float] = if(wordBnorm==0){
+            Array.fill[Float](vectorSize)(0)
+          }else{
+            syn0Modify
+              .slice(x._2 * vectorSize, (x._2+1) * vectorSize)
+              .map(x=>x/wordAnorm.toFloat)
+          }
           // f函数
           val entryWeight = Math.pow(Math.min(1.0, (count / maxCount)), alpha)
           // 实际不为LOSS，而是LOSS的导数
-          val loss = entryWeight * (prediction - Math.log(count))
+          val loss = entryWeight * (prediction+syn1Modify(x._1)+syn1Modify(x._2) - Math.log(count))
           // 梯度下降进行求解
           for (i <- 0 until vectorSize) {
-            syn0Modify(l1+i) = (syn0Modify(l1+i)- learningRate * loss * syn0Modify(l2+i) / word_a_norm).toFloat
-            syn0Modify(l2+i) = (syn0Modify(l2+i)- learningRate * loss * syn0Modify(l1+i) / word_b_norm).toFloat
+            syn0Modify(l1+i) = (word1Normlize(i)- learningRate * loss * word2Normlize(i) ).toFloat
+            syn0Modify(l2+i) = (word2Normlize(i)- learningRate * loss * word1Normlize(i) ).toFloat
           }
           syn1Modify(x._1) -= (learningRate * loss).toFloat
           syn1Modify(x._2) -= (learningRate * loss).toFloat
@@ -199,7 +214,7 @@ class GloveModel  (
     }
 
     val bcSyn0Global = sc.broadcast(syn0Global)
-//    vocabHash.map(x=>x._2).foreach(x=>print(s"${x},"))
+    //    vocabHash.map(x=>x._2).foreach(x=>print(s"${x},"))
 
     val value = sc
       .parallelize(vocabHash.map(x=>(x._1, x._2)).toArray[(String,Int)])
