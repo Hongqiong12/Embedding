@@ -45,8 +45,8 @@ class GloveModel  (
                     window:        Int    = 5,
                     numComponents: Int    = 50,
                     minCount:      Int    = 0,
-                    learningRate:  Double = 0.05f,
-                    alpha:         Double = 0.75,
+                    learningRate:  Double = 0.05d,
+                    alpha:         Double = 0.75d,
                     seed:          Long   = 2L ,
                     vectorSize:    Int    = 32,
                     numIterations: Int    = 1
@@ -136,18 +136,20 @@ class GloveModel  (
     val sc: SparkContext = dataset.context
     // 初始化向量
     val initRandom = new XORShiftRandom(seed)
-    val syn0Global: Array[Float] =Array.fill[Float](vocabSize * vectorSize)((initRandom.nextFloat() - 0.5f) / vectorSize)
-    val syn1Global: Array[Float] = Array.fill[Float](vocabSize)((initRandom.nextFloat() - 0.5f) / vectorSize)
+    val syn0Global: Array[Float] =Array.fill[Float](vocabSize * vectorSize)((initRandom.nextFloat() - 0.5f) / vectorSize) // embedding向量初始化
+    val syn1Global: Array[Float] = Array.fill[Float](vocabSize)(0.0f)  // 偏置项初始化
     // 测试代码
-    val startIndex: Int = vocabHash.getOrElse("6277_201512", 1)
-    println(s" 单词6277_201512的embedding向量为： ${syn0Global.slice(startIndex*vectorSize,(startIndex+1)*vectorSize).map(x=>x.toString).mkString(",")}")
-    //
+    if(vocabHash.contains("6277_201512")) {
+      val startIndex: Int = vocabHash.getOrElse("6277_201512", 1)
+      println(s" 初始化单词6277_201512的embedding向量为： ${syn0Global.slice(startIndex * vectorSize, (startIndex + 1) * vectorSize).map(x => x.toString).mkString(",")}")
+    }//
     val alpha = learningRate
     for (k <- 1 to numIterations) {
       println(s"------迭代第${k}步的结果----------")
       val bcSyn0Global = sc.broadcast(syn0Global)
       val bcSyn1Global = sc.broadcast(syn1Global)
-      val partial: RDD[(Int, Array[Float])] = coMatrix
+      // 分布式更新参数
+      val partial: RDD[(Int, Array[Float], Float)] = coMatrix
         .mapPartitions { sentences: Iterator[(Int, Int, Double)] =>
           val syn0Modify: Array[Float] = bcSyn0Global.value
           val syn1Modify: Array[Float] = bcSyn1Global.value
@@ -156,54 +158,93 @@ class GloveModel  (
             val l2 = x._2 * vectorSize //w2的起始位置
             val count = x._3              //两个词共现的次数
             val prediction: Float = blas.sdot(vectorSize, syn0Modify, l1, 1, syn0Modify, l2, 1)
-            val wordAnorm: Double = math.sqrt(blas.sdot(vectorSize, syn0Modify, l1, 1, syn0Modify, l1, 1))
-            val wordBnorm: Double = math.sqrt(blas.sdot(vectorSize, syn0Modify, l2, 1, syn0Modify, l2, 1))
-            //  进行归一化
-            val word1Normlize: Array[Float] = if(wordAnorm-0.0<=1e-7){
-              Array.fill[Float](vectorSize)(0)
-            }else{
-              syn0Modify
-                .slice(x._1 * vectorSize, (x._1+1) * vectorSize)
-                .map(x=>x/wordAnorm.toFloat)
-            }
-            val word2Normlize: Array[Float] = if(wordBnorm-0.0<=1e-7){
-              Array.fill[Float](vectorSize)(0)
-            }else{
-              syn0Modify
-                .slice(x._2 * vectorSize, (x._2+1) * vectorSize)
-                .map(x=>x/wordAnorm.toFloat)
-            }
+//            val wordAnorm = math.sqrt(blas.sdot(vectorSize, syn0Modify, l1, 1, syn0Modify, l1, 1)) // 一旦模为0，就会出现NaN和infinit的情况。
+//            val wordBnorm = math.sqrt(blas.sdot(vectorSize, syn0Modify, l2, 1, syn0Modify, l2, 1))
+//            //  进行归一化
+//            val word1Normlize: Array[Float] = if(wordAnorm-0.0<=1e-7){
+//              Array.fill[Float](vectorSize)(0)
+//            }else{
+//              syn0Modify
+//                .slice(x._1 * vectorSize, (x._1+1) * vectorSize)
+//                .map(x=>x/wordAnorm.toFloat)
+//            }
+//            val word2Normlize: Array[Float] = if(wordBnorm-0.0<=1e-7){
+//              Array.fill[Float](vectorSize)(0)
+//            }else{
+//              syn0Modify
+//                .slice(x._2 * vectorSize, (x._2+1) * vectorSize)
+//                .map(x=>x/wordAnorm.toFloat)
+//            }
             // f函数
             val entryWeight = Math.pow(Math.min(1.0f, (count / maxCount)), alpha)
             // 实际不为LOSS，而是LOSS的导数
             val loss = entryWeight * (prediction+syn1Modify(x._1)+syn1Modify(x._2) - Math.log(count))
+            println(s"---curLoss=${loss}, entryWeight=${entryWeight}, count=${count}, syn1Modify(x._1)=${syn1Modify(x._1)}, syn1Modify(x._2)=${syn1Modify(x._2)}, prediction=${prediction} -----")
             // 梯度下降进行求解
             for (i <- 0 until vectorSize) {
-              syn0Modify(l1+i) = (word1Normlize(i)- learningRate * loss * word2Normlize(i) ).toFloat
-              syn0Modify(l2+i) = (word2Normlize(i)- learningRate * loss * word1Normlize(i) ).toFloat
+//              syn0Modify(l1+i) = (word1Normlize(i)- learningRate * loss * word2Normlize(i)).toFloat
+//              syn0Modify(l2+i) = (word2Normlize(i)- learningRate * loss * word1Normlize(i)).toFloat
+                syn0Modify(l1+i) = (syn0Modify(l1+i)- learningRate * loss * syn0Modify(l2+i)).toFloat
+                syn0Modify(l2+i) = (syn0Modify(l2+i)- learningRate * loss * syn0Modify(l1+i)).toFloat
             }
             syn1Modify(x._1) -= (learningRate * loss).toFloat
             syn1Modify(x._2) -= (learningRate * loss).toFloat
           }
           Iterator.tabulate(vocabSize) { index =>
-            Some((index, syn0Modify.slice(index * vectorSize, (index + 1) * vectorSize)))
+            Some(
+              (
+                index, // 索引
+                syn0Modify.slice(index * vectorSize, (index + 1) * vectorSize), // 权重向量
+                syn1Modify(index) // 偏置项
+              )
+            )
           }.flatten
-      }
-      val wordEmbed = partial.collectAsMap()
+        }
+      // 将不同partition的向量进行合并更新
+      // 权重向量的更新，实际上是对所有ID一样的向量相加，再除以次数
+      val synAgg1 = partial.mapPartitions { iter =>
+        iter.map { case (id, vec: Array[Float],bais) =>
+          (id, (vec, 1))
+        }
+      }.reduceByKey { case ((v1: Array[Float], count1: Int), (v2: Array[Float], count2: Int)) =>
+        blas.saxpy(vectorSize, 1.0f, v2, 1, v1, 1)
+        (v1, count1 + count2)
+      }.map { case (id, (vec, count)) =>
+        blas.sscal(vectorSize, 1.0f / count, vec, 1)
+        (id, vec)
+      }.collect()
+      // 偏置项的更新
+      val synAgg2: Array[(Int, Float)] = partial.mapPartitions { iter =>
+        iter.map { case (id, vec: Array[Float],bais: Float) =>
+          (id, (bais, 1))
+        }
+      }.reduceByKey { case ((v1: Float, count1: Int), (v2: Float, count2: Int)) =>
+        val v = v1+v2
+        (v, count1 + count2)
+      }.map { case (id, (vec: Float, count)) =>
+        (id, vec/count)
+      }.collect()
+
+//      println("-----参数向量更新完的结果----------------")
+//      synAgg1.foreach(x=>println(s"${x._1}  :  ${x._2.map(x=>x.toString).mkString(",")}"))
+//      println("-----偏置项更新完的结果----------------")
+//      synAgg2.foreach(x=>println(s"${x._1}  :  ${x._2}"))
       for(i<- 0 until vocabSize){
-        val maybeFloats: Array[Float] = wordEmbed.getOrElse(i, Array.fill[Float](vectorSize)(0))
-        Array.copy(maybeFloats, 0, syn0Global,  vectorSize, vectorSize)
+        Array.copy(synAgg1(i)._2, 0, syn0Global,  vectorSize, vectorSize)
+        syn1Global(i)=synAgg2(i)._2
       }
+
       bcSyn0Global.destroy(false)
       bcSyn1Global.destroy(false)
       //
-      val startIndex: Int = vocabHash.getOrElse("6277_201512", 1)
-      println(s" ${k}步后，单词6277_201512的embedding向量为： ${syn0Global.slice(startIndex*vectorSize,(startIndex+1)*vectorSize).map(x=>x.toString).mkString(",")}")
+      if(vocabHash.contains("6277_201512")) {
+        val startIndex: Int = vocabHash.getOrElse("6277_201512", 1)
+        println(s" ${k}步后，单词6277_201512的embedding向量为： ${syn0Global.slice(startIndex * vectorSize, (startIndex + 1) * vectorSize).map(x => x.toString).mkString(",")}")
+      }
       //
     }
 
     val bcSyn0Global = sc.broadcast(syn0Global)
-    //    vocabHash.map(x=>x._2).foreach(x=>print(s"${x},"))
 
     val value = sc
       .parallelize(vocabHash.map(x=>(x._1, x._2)).toArray[(String,Int)])
@@ -211,13 +252,6 @@ class GloveModel  (
         val wordIndex: Int = x._2
         (x._1, bcSyn0Global.value.slice(wordIndex*vectorSize,(wordIndex+1)*vectorSize).map(x=>x.toString).mkString(","))
       }
-    //
-    //
-    //
-    //    println("-------------将syn0Global按照vectorSize大小切分成二维数组---------------")
-    //    val tmpArr = split(syn0Global.toList, vectorSize)
-    //    val tuples = vocab.map(x => x._1).zip(tmpArr).map(x=>(x._1, x._2.map(x=>x.toString).mkString(",")))
-    //    val value = sc.parallelize(tuples)
     value
   }
 
