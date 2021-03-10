@@ -82,7 +82,6 @@ object SparkUtil {
   }
 
   /**
-   * 根据京东的hadoop平台的配置，获取文件系统对象
    * @return
    */
   def toHaasPath(confPath:String): FileSystem = {
